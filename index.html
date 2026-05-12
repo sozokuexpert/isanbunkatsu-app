@@ -106,6 +106,7 @@ body{
   .doc-paper{padding:18px 15px}
 }
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/docx/8.5.0/docx.js"></script>
 </head>
 <body>
 <input type="hidden" id="d-docdate">
@@ -614,7 +615,15 @@ function rtfPara(text, opts){
   if(opts.b) s += "\b0";
   return s+"\par\n";
 }
+/* ============================================================
+   Word (.docx) ダウンロード  ― docx.js (cdnjs 8.5.0) 使用
+   ============================================================ */
 function downloadWord(){
+  if(typeof docx === "undefined"){
+    alert("docxライブラリの読み込みに失敗しました。\nインターネット接続を確認して再度お試しください。");
+    return;
+  }
+
   var nm = document.getElementById("d-name").value.trim()||"被相続人";
   var hk = document.getElementById("d-honseki").value.trim();
   var ad = document.getElementById("d-address").value.trim();
@@ -622,51 +631,140 @@ function downloadWord(){
   var dd = jdate(document.getElementById("d-docdate").value);
   var arts = buildArts();
 
-  var r = "{\rtf1\ansi\ansicpg932\deff0\n";
-  r += "{\fonttbl{\f0\fnil\fcharset128 MS Mincho;}}\n";
-  r += "\paperw11906\paperh16838\margl1701\margr1701\margt1134\margb1134\n";
-  r += rtfPara("遺産分割協議書", {c:true,b:true,sz:36});
-  r += rtfPara("", {});
-  if(nm) r += rtfPara("被相続人　"+nm, {});
-  if(hk) r += rtfPara("本籍地　　"+hk, {});
-  if(ad) r += rtfPara("住所　　　"+ad, {});
-  if(dt) r += rtfPara("死亡年月日　"+dt, {});
-  r += rtfPara("", {});
-  arts.forEach(function(a){
-    r += rtfPara("第"+kanji(a.no)+"条　"+a.title, {b:true});
-    a.body.split("\n").forEach(function(l){ r += rtfPara("\u3000"+l, {}); });
-    r += rtfPara("", {});
-  });
-  r += rtfPara("以上", {r:true});
-  r += "\page\n";
-  if(dd) r += rtfPara(dd, {});
-  r += rtfPara("", {});
-  heirs.forEach(function(heir){
-    if(heir.a) r += rtfPara("【住所】"+heir.a, {r:true});
-    if(heir.n) r += rtfPara("【氏名】"+heir.n+"　　　　㊞", {r:true});
-    r += rtfPara("", {});
-  });
-  r += "\page\n";
-  r += rtfPara("必ずお読みください（免責事項）", {c:true,b:true});
-  r += rtfPara("", {});
-  r += rtfPara("この遺産分割協議書作成フォームは、多くの方に対して簡易迅速に遺産分割協議書の下書きを作成することを目的としているため、正確ではありません。あくまで参考程度にとどめて、相続問題に精通した専門家にご相談されるようにしてください。", {});
-  r += rtfPara("１．すべての遺産を対象にできていない可能性があります。", {});
-  r += rtfPara("２．遺産の時価評価については専門家による査定を踏まえて進めることをお勧めします。", {});
-  r += rtfPara("３．その他、例外的な事案や個別事情を考慮していません。", {});
-  r += rtfPara("４．本フォームを利用されたことにより生じた不利益な結果や損害などについては、一切責任を負いかねますので予めご了承ください。", {});
-  r += rtfPara("", {});
-  r += rtfPara("相続問題でお困りの方は、日本全国合計100名超の行政書士・司法書士・税理士と提携している一般社団法人相続手続士業の会にお気軽にご相談ください。", {c:true});
-  r += "}";
+  var D   = docx;
+  var Doc = D.Document;
+  var Par = D.Paragraph;
+  var Run = D.TextRun;
+  var Spc = D.Spacing;
+  var Hdr = D.Header;
+  var Pgb = D.PageBreak;
 
-  var blob = new Blob([r], {type:"application/rtf"});
-  var url  = URL.createObjectURL(blob);
-  var a    = document.createElement("a");
-  a.href   = url;
-  a.download = "遺産分割協議書_"+nm+".rtf";
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  /* --- スタイル定数 --- */
+  var FONT    = "MS 明朝";
+  var SZ      = 24;  /* 12pt = 24 half-points */
+  var SZ_TITLE= 36;  /* 18pt */
+  var LINE_SP = { before:0, after:120, line:480, lineRule:"auto" };
+  var SIG_SP  = { before:0, after:240, line:480, lineRule:"auto" };
+
+  function para(text, opts){
+    opts = opts||{};
+    var children = [];
+    var runOpts = {
+      text: text||"",
+      font: FONT,
+      size: opts.sz||SZ,
+      bold: opts.bold||false
+    };
+    children.push(new Run(runOpts));
+    return new Par({
+      alignment: opts.center ? D.AlignmentType.CENTER
+                : opts.right  ? D.AlignmentType.RIGHT
+                : D.AlignmentType.LEFT,
+      spacing:   opts.sigsp ? SIG_SP : LINE_SP,
+      children:  children
+    });
+  }
+
+  function bold(text, opts){
+    opts = opts||{};
+    opts.bold = true;
+    return para(text, opts);
+  }
+
+  function empty(){ return para(""); }
+
+  /* --- 本文ページ --- */
+  var bodyParas = [];
+
+  /* タイトル */
+  bodyParas.push(bold("遺産分割協議書", {center:true, sz:SZ_TITLE}));
+  bodyParas.push(empty());
+
+  /* 被相続人情報 */
+  if(nm) bodyParas.push(para("被相続人　"+nm));
+  if(hk) bodyParas.push(para("本籍地　　"+hk));
+  if(ad) bodyParas.push(para("住所　　　"+ad));
+  if(dt) bodyParas.push(para("死亡年月日　"+dt));
+  bodyParas.push(empty());
+
+  /* 条文 */
+  arts.forEach(function(a){
+    bodyParas.push(bold("第"+kanji(a.no)+"条　"+a.title));
+    a.body.split("\n").forEach(function(l){
+      bodyParas.push(para("　"+l));
+    });
+    bodyParas.push(empty());
+  });
+
+  /* 以上 */
+  bodyParas.push(para("以上", {right:true}));
+
+  /* --- 署名ページ --- */
+  var sigParas = [];
+  sigParas.push(new Par({
+    children:[new Run({text:"", font:FONT, size:SZ})],
+    pageBreakBefore:true
+  }));
+  if(dd) sigParas.push(para(dd));
+  sigParas.push(empty());
+  sigParas.push(empty());
+
+  heirs.forEach(function(h){
+    if(h.a) sigParas.push(para("【住所】"+h.a, {right:true, sigsp:true}));
+    if(h.n) sigParas.push(para("【氏名】"+h.n+"　　　　㊞", {right:true, sigsp:true}));
+    sigParas.push(empty());
+  });
+
+  /* --- 免責事項ページ --- */
+  var discParas = [];
+  discParas.push(new Par({
+    children:[new Run({text:"", font:FONT, size:SZ})],
+    pageBreakBefore:true
+  }));
+  discParas.push(bold("必ずお読みください（免責事項）", {center:true}));
+  discParas.push(empty());
+  discParas.push(para("この遺産分割協議書作成フォームは、多くの方に対して簡易迅速に遺産分割協議書の下書きを作成することを目的としているため、正確ではありません。あくまで参考程度にとどめて、相続問題に精通した専門家にご相談されるようにしてください。"));
+  discParas.push(empty());
+  discParas.push(para("１．すべての遺産を対象にできていない可能性があります。"));
+  discParas.push(para("２．遺産の時価評価については専門家による査定を踏まえて進めることをお勧めします。"));
+  discParas.push(para("３．その他、例外的な事案や個別事情を考慮していません。"));
+  discParas.push(para("４．本フォームを利用されたことにより生じた不利益な結果や損害などについては、一切責任を負いかねますので予めご了承ください。"));
+  discParas.push(empty());
+  discParas.push(para("相続問題でお困りの方は、日本全国合計100名超の行政書士・司法書士・税理士と提携している一般社団法人相続手続士業の会にお気軽にご相談ください。", {center:true}));
+
+  /* --- ドキュメント生成 --- */
+  var doc = new Doc({
+    styles:{
+      default:{
+        document:{
+          run:{ font:FONT, size:SZ }
+        }
+      }
+    },
+    sections:[{
+      properties:{
+        page:{
+          margin:{ top:1440, right:1440, bottom:1440, left:1440 }
+        }
+      },
+      children: bodyParas.concat(sigParas).concat(discParas)
+    }]
+  });
+
+  /* --- Blob → ダウンロード --- */
+  D.Packer.toBlob(doc).then(function(blob){
+    var url = URL.createObjectURL(blob);
+    var a   = document.createElement("a");
+    a.href  = url;
+    a.download = "遺産分割協議書_"+nm+".docx";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }).catch(function(e){
+    console.error("docx生成エラー:", e);
+    alert("Wordファイルの生成中にエラーが発生しました。\n詳細はコンソールをご確認ください。");
+  });
 }
 
 /* ============================================================
