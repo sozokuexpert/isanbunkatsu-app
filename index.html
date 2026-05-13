@@ -23698,7 +23698,7 @@ function rtfPara(text, opts){
    ============================================================ */
 function downloadWord(){
   if(typeof docx === "undefined"){
-    alert("docxライブラリの読み込みに失敗しました。\nインターネット接続を確認して再度お試しください。");
+    alert("docxライブラリの読み込みに失敗しました。");
     return;
   }
 
@@ -23709,127 +23709,146 @@ function downloadWord(){
   var dd = jdate(document.getElementById("d-docdate").value);
   var arts = buildArts();
 
-  var D   = docx;
-  var Doc = D.Document;
-  var Par = D.Paragraph;
-  var Run = D.TextRun;
-  var Spc = D.Spacing;
-  var Hdr = D.Header;
-  var Pgb = D.PageBreak;
+  var D = docx;
 
-  /* --- スタイル定数 --- */
-  var FONT    = "MS 明朝";
-  var SZ      = 24;  /* 12pt = 24 half-points */
-  var SZ_TITLE= 36;  /* 18pt */
-  var LINE_SP = { before:0, after:120, line:480, lineRule:"auto" };
-  var SIG_SP  = { before:0, after:240, line:480, lineRule:"auto" };
+  /* -------------------------------------------------------
+     スタイル定数
+     line:240 + lineRule:"auto" = 1倍行間
+     before:0, after:0 = 段落前後余白ゼロ
+  ------------------------------------------------------- */
+  var FONT     = "MS 明朝";
+  var SZ_BODY  = 22;   /* 11pt (22 half-points) */
+  var SZ_TITLE = 32;   /* 16pt */
+  var SZ_H1    = 24;   /* 12pt */
 
+  var SP_NORMAL = { line:240, lineRule:"auto", before:0, after:0 };
+  var SP_AFTER  = { line:240, lineRule:"auto", before:0, after:120 }; /* 条文間だけ6pt */
+
+  /* 余白: 上下25mm(1417), 左右25mm(1417) */
+  var PAGE_MARGIN = { top:1417, right:1417, bottom:1417, left:1417 };
+
+  /* -------------------------------------------------------
+     ヘルパー
+  ------------------------------------------------------- */
   function para(text, opts){
     opts = opts||{};
-    var children = [];
-    var runOpts = {
-      text: text||"",
-      font: FONT,
-      size: opts.sz||SZ,
-      bold: opts.bold||false
-    };
-    children.push(new Run(runOpts));
-    return new Par({
+    return new D.Paragraph({
       alignment: opts.center ? D.AlignmentType.CENTER
-                : opts.right  ? D.AlignmentType.RIGHT
-                : D.AlignmentType.LEFT,
-      spacing:   opts.sigsp ? SIG_SP : LINE_SP,
-      children:  children
+               : opts.right  ? D.AlignmentType.RIGHT
+               : D.AlignmentType.LEFT,
+      spacing: opts.aftersp ? SP_AFTER : SP_NORMAL,
+      pageBreakBefore: opts.pageBreak||false,
+      children:[new D.TextRun({
+        text:  text||"",
+        font:  FONT,
+        size:  opts.sz||SZ_BODY,
+        bold:  opts.bold||false
+      })]
     });
   }
 
-  function bold(text, opts){
-    opts = opts||{};
-    opts.bold = true;
-    return para(text, opts);
-  }
-
+  function bold(text, opts){ opts=opts||{}; opts.bold=true; return para(text, opts); }
   function empty(){ return para(""); }
 
-  /* --- 本文ページ --- */
-  var bodyParas = [];
+  /* -------------------------------------------------------
+     本文ページ
+  ------------------------------------------------------- */
+  var paras = [];
 
   /* タイトル */
-  bodyParas.push(bold("遺産分割協議書", {center:true, sz:SZ_TITLE}));
-  bodyParas.push(empty());
+  paras.push(bold("遺産分割協議書", {center:true, sz:SZ_TITLE}));
+  paras.push(empty());
 
   /* 被相続人情報 */
-  if(nm) bodyParas.push(para("被相続人　"+nm));
-  if(hk) bodyParas.push(para("本籍地　　"+hk));
-  if(ad) bodyParas.push(para("住所　　　"+ad));
-  if(dt) bodyParas.push(para("死亡年月日　"+dt));
-  bodyParas.push(empty());
+  if(nm) paras.push(para("被相続人　"  +nm, {sz:SZ_H1}));
+  if(hk) paras.push(para("本籍地　　"  +hk, {sz:SZ_H1}));
+  if(ad) paras.push(para("住所　　　"  +ad, {sz:SZ_H1}));
+  if(dt) paras.push(para("死亡年月日　"+dt, {sz:SZ_H1}));
+  paras.push(empty());
 
   /* 条文 */
   arts.forEach(function(a){
-    bodyParas.push(bold("第"+kanji(a.no)+"条　"+a.title));
-    a.body.split("\n").forEach(function(l){
-      bodyParas.push(para("　"+l));
+    paras.push(bold("第"+kanji(a.no)+"条　"+a.title, {sz:SZ_H1}));
+    a.body.split("\n").forEach(function(line){
+      paras.push(para("　"+line, {sz:SZ_H1}));
     });
-    bodyParas.push(empty());
+    paras.push(empty());
   });
 
   /* 以上 */
-  bodyParas.push(para("以上", {right:true}));
+  paras.push(para("以上", {right:true, sz:SZ_H1}));
 
-  /* --- 署名ページ --- */
-  var sigParas = [];
-  sigParas.push(new Par({
-    children:[new Run({text:"", font:FONT, size:SZ})],
-    pageBreakBefore:true
-  }));
-  if(dd) sigParas.push(para(dd));
-  sigParas.push(empty());
-  sigParas.push(empty());
+  /* -------------------------------------------------------
+     署名ページ（改ページ）
+  ------------------------------------------------------- */
+  paras.push(para("", {pageBreak:true}));
+  if(dd) paras.push(para(dd, {sz:SZ_H1}));
+  paras.push(empty());
+  paras.push(empty());
 
   heirs.forEach(function(h){
-    if(h.a) sigParas.push(para("【住所】"+h.a, {right:true, sigsp:true}));
-    if(h.n) sigParas.push(para("【氏名】"+h.n+"　　　　㊞", {right:true, sigsp:true}));
-    sigParas.push(empty());
+    if(h.a) paras.push(para("【住所】"+h.a,              {right:true, sz:SZ_H1}));
+    if(h.n) paras.push(para("【氏名】"+h.n+"　　　　㊞", {right:true, sz:SZ_H1}));
+    paras.push(empty());
   });
 
-  /* --- 免責事項ページ --- */
-  var discParas = [];
-  discParas.push(new Par({
-    children:[new Run({text:"", font:FONT, size:SZ})],
-    pageBreakBefore:true
-  }));
-  discParas.push(bold("必ずお読みください（免責事項）", {center:true}));
-  discParas.push(empty());
-  discParas.push(para("この遺産分割協議書作成フォームは、多くの方に対して簡易迅速に遺産分割協議書の下書きを作成することを目的としているため、正確ではありません。あくまで参考程度にとどめて、相続問題に精通した専門家にご相談されるようにしてください。"));
-  discParas.push(empty());
-  discParas.push(para("１．すべての遺産を対象にできていない可能性があります。"));
-  discParas.push(para("２．遺産の時価評価については専門家による査定を踏まえて進めることをお勧めします。"));
-  discParas.push(para("３．その他、例外的な事案や個別事情を考慮していません。"));
-  discParas.push(para("４．本フォームを利用されたことにより生じた不利益な結果や損害などについては、一切責任を負いかねますので予めご了承ください。"));
-  discParas.push(empty());
-  discParas.push(para("相続問題でお困りの方は、日本全国合計100名超の行政書士・司法書士・税理士と提携している一般社団法人相続手続士業の会にお気軽にご相談ください。", {center:true}));
+  /* -------------------------------------------------------
+     免責事項ページ（改ページ）
+  ------------------------------------------------------- */
+  paras.push(para("", {pageBreak:true}));
+  paras.push(bold("必ずお読みください（免責事項）", {center:true, sz:SZ_H1}));
+  paras.push(empty());
+  paras.push(para("この遺産分割協議書作成フォームは、多くの方に対して簡易迅速に遺産分割協議書の下書きを作成することを目的としているため、正確ではありません。あくまで参考程度にとどめて、相続問題に精通した専門家にご相談されるようにしてください。", {sz:SZ_BODY}));
+  paras.push(empty());
+  paras.push(para("１．すべての遺産を対象にできていない可能性があります。",         {sz:SZ_BODY}));
+  paras.push(para("２．遺産の時価評価については専門家による査定を踏まえて進めることをお勧めします。", {sz:SZ_BODY}));
+  paras.push(para("３．その他、例外的な事案や個別事情を考慮していません。",         {sz:SZ_BODY}));
+  paras.push(para("４．本フォームを利用されたことにより生じた不利益な結果や損害などについては、一切責任を負いかねますので予めご了承ください。", {sz:SZ_BODY}));
+  paras.push(empty());
+  paras.push(para("相続問題でお困りの方は、日本全国合計100名超の行政書士・司法書士・税理士と提携している一般社団法人相続手続士業の会にお気軽にご相談ください。", {center:true, sz:SZ_BODY}));
+  paras.push(empty());
 
-  /* --- ドキュメント生成 --- */
-  var doc = new Doc({
+  /* -------------------------------------------------------
+     フッター画像（JPEG, 幅567px≒150mm, 中央寄せ）
+  ------------------------------------------------------- */
+  try {
+    var IMG_B64 = FOOTER_IMG.replace(/^data:[^;]+;base64,/, "");
+    var imgBytes = Uint8Array.from(atob(IMG_B64), function(c){ return c.charCodeAt(0); });
+    var imgRun = new D.ImageRun({
+      type: "jpg",
+      data: imgBytes,
+      transformation: { width:567, height:284 }
+    });
+    paras.push(new D.Paragraph({
+      alignment: D.AlignmentType.CENTER,
+      spacing:   SP_NORMAL,
+      children:  [imgRun]
+    }));
+  } catch(imgErr){
+    console.warn("画像挿入スキップ:", imgErr.message);
+  }
+
+  /* -------------------------------------------------------
+     ドキュメント生成
+  ------------------------------------------------------- */
+  var doc = new D.Document({
     styles:{
       default:{
         document:{
-          run:{ font:FONT, size:SZ }
+          run:{ font:FONT, size:SZ_BODY }
+        },
+        normal:{
+          run:{ font:FONT, size:SZ_BODY },
+          paragraph:{ spacing:SP_NORMAL }
         }
       }
     },
     sections:[{
-      properties:{
-        page:{
-          margin:{ top:1440, right:1440, bottom:1440, left:1440 }
-        }
-      },
-      children: bodyParas.concat(sigParas).concat(discParas)
+      properties:{ page:{ margin:PAGE_MARGIN } },
+      children: paras
     }]
   });
 
-  /* --- Blob → ダウンロード --- */
   D.Packer.toBlob(doc).then(function(blob){
     var url = URL.createObjectURL(blob);
     var a   = document.createElement("a");
