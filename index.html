@@ -23972,30 +23972,54 @@ function closeSbConfig(){
 
 /* ---- 設定を保存＆接続テスト ---- */
 function saveSbConfig(){
-  var url  = document.getElementById("sb-url").value.trim();
-  var key  = document.getElementById("sb-key").value.trim();
-  var user = document.getElementById("sb-user").value.trim();
+  var rawUrl = document.getElementById("sb-url").value.trim();
+  var key    = document.getElementById("sb-key").value.trim();
+  var user   = document.getElementById("sb-user").value.trim();
   var statusEl = document.getElementById("sb-config-status");
 
-  if(!url || !key){
+  if(!rawUrl || !key){
     statusEl.style.color = "#c0392b";
     statusEl.textContent = "URLとAnon Keyを入力してください。";
+    return;
+  }
+
+  /* ---- URL自動クリーニング ---- */
+  /* 末尾の / を除去 */
+  var url = rawUrl.replace(/\/+$/, "");
+  /* http:// → https:// に自動修正 */
+  url = url.replace(/^http:\/\//, "https://");
+  /* URLをinputに反映して見える化 */
+  document.getElementById("sb-url").value = url;
+
+  /* ---- 入力値バリデーション ---- */
+  if(!url.match(/^https:\/\/[a-z0-9]+\.supabase\.co$/i)){
+    statusEl.style.color = "#c0392b";
+    statusEl.textContent = "⚠ URLの形式が正しくありません。\n例: https://xxxxxx.supabase.co\n（末尾に / やパスを付けないでください）";
+    return;
+  }
+  if(!key.startsWith("eyJ")){
+    statusEl.style.color = "#c0392b";
+    statusEl.textContent = "⚠ Anon Keyが正しくないようです。eyJhbGci... で始まるキーを入力してください。";
     return;
   }
 
   statusEl.style.color = "var(--text2)";
   statusEl.textContent = "接続テスト中...";
 
-  /* casesテーブルに接続確認（1件だけ取得） */
-  fetch(url + "/rest/v1/cases?select=id&limit=1", {
+  /* ---- casesテーブルに接続確認（1件だけ取得） ---- */
+  var testUrl = url + "/rest/v1/cases?select=id&limit=1";
+  fetch(testUrl, {
+    method: "GET",
     headers: {
       "apikey":        key,
       "Authorization": "Bearer " + key,
-      "Content-Type":  "application/json"
+      "Content-Type":  "application/json",
+      "Accept":        "application/json"
     }
   })
   .then(function(r){
     if(r.ok || r.status === 406){
+      /* 保存 */
       localStorage.setItem(SB_URL_KEY,  url);
       localStorage.setItem(SB_KEY_KEY,  key);
       localStorage.setItem(SB_USER_KEY, user);
@@ -24003,14 +24027,22 @@ function saveSbConfig(){
       statusEl.textContent = "✓ 接続成功！設定を保存しました。";
     } else {
       return r.text().then(function(t){
+        var hint = "";
+        if(r.status === 404){ hint = "\n→ テーブルが存在しないか、URLが間違っています。SQLでテーブルを作成してください。"; }
+        if(r.status === 401){ hint = "\n→ Anon Keyが間違っています。ダッシュボードで再確認してください。"; }
+        if(r.status === 403){ hint = "\n→ RLSポリシーが設定されていません。SQL Editorで CREATE POLICY を実行してください。"; }
         statusEl.style.color = "#c0392b";
-        statusEl.textContent = "接続失敗 (HTTP " + r.status + "): " + t.slice(0,120);
+        statusEl.textContent = "接続失敗 (HTTP " + r.status + "): " + t.slice(0,120) + hint;
       });
     }
   })
   .catch(function(e){
     statusEl.style.color = "#c0392b";
-    statusEl.textContent = "エラー: " + e.message;
+    var msg = e.message||"";
+    var hint = "";
+    if(msg.indexOf("Failed to fetch") >= 0){ hint = "\n→ URLが間違っているか、ネットワークエラーです。"; }
+    if(msg.indexOf("CORS") >= 0){ hint = "\n→ URLの形式を確認してください。"; }
+    statusEl.textContent = "エラー: " + msg + hint;
   });
 }
 
