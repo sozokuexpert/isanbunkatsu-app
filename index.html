@@ -92,6 +92,37 @@ body{
 .save-dot{width:6px;height:6px;border-radius:50%;background:var(--success)}
 .multi-wrap{border:.5px solid var(--border2);border-radius:var(--radius);background:var(--bg);padding:6px 8px;max-height:110px;overflow-y:auto}
 .multi-wrap label{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text);padding:2px;cursor:pointer}
+.btn-save{background:#2d6a4f;color:#fff;border-color:#2d6a4f}
+.btn-save:hover{background:#1b4332}
+.btn-cloud{background:#1a6eb5;color:#fff;border-color:#1a6eb5}
+.btn-cloud:hover{background:#0f4c81}
+/* ---- Supabase設定モーダル ---- */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:500;display:flex;align-items:center;justify-content:center}
+.modal{background:var(--bg);border-radius:var(--radius-lg);padding:24px 28px;width:480px;max-width:92vw;box-shadow:0 8px 32px rgba(0,0,0,.2);position:relative}
+.modal h2{font-size:15px;font-weight:600;margin-bottom:4px}
+.modal p{font-size:12px;color:var(--text2);margin-bottom:18px}
+.modal .field{margin-bottom:12px}
+.modal .close-btn{position:absolute;top:14px;right:16px;background:none;border:none;font-size:20px;cursor:pointer;color:var(--text3)}
+.modal .close-btn:hover{color:var(--text)}
+.modal .btn-row{display:flex;gap:8px;margin-top:16px;justify-content:flex-end}
+.modal .note{font-size:11px;color:var(--text3);margin-top:8px;line-height:1.6}
+/* ---- 案件一覧モーダル ---- */
+.case-list-modal{width:700px;max-width:95vw;max-height:85vh;display:flex;flex-direction:column}
+.case-list-modal .modal-body{flex:1;overflow-y:auto}
+.case-table{width:100%;border-collapse:collapse;font-size:12px}
+.case-table th{background:var(--bg2);padding:8px 10px;text-align:left;font-weight:500;border-bottom:.5px solid var(--border);position:sticky;top:0}
+.case-table td{padding:8px 10px;border-bottom:.5px solid var(--border);vertical-align:top}
+.case-table tr:hover td{background:var(--bg2)}
+.status-badge{display:inline-block;font-size:10px;padding:2px 6px;border-radius:8px;font-weight:500}
+.st-draft{background:#e8f4fd;color:#0c5e9a}
+.st-review{background:#fff3cd;color:#856404}
+.st-fix{background:#fde8e8;color:#9a0c0c}
+.st-done{background:#d4edda;color:#155724}
+.st-delivered{background:#e2e3e5;color:#383d41}
+.cloud-status{font-size:11px;padding:3px 8px;border-radius:4px;display:inline-flex;align-items:center;gap:4px}
+.cs-ok{background:#d4edda;color:#155724}
+.cs-err{background:#fde8e8;color:#9a0c0c}
+.cs-loading{background:#e8f4fd;color:#0c5e9a}
 @media print{
   .sidebar,.app-header,.preview-label,.save-ind{display:none!important}
   .app-body{height:auto;display:block}
@@ -23195,7 +23226,9 @@ var __async = (__this, __arguments, generator) => {
     <p>情報を入力すると右側にリアルタイムでプレビューが表示されます</p>
   </div>
   <div class="header-actions">
-    <div class="save-ind"><span class="save-dot"></span>自動保存</div>
+    <div class="save-ind" id="save-ind"><span class="save-dot"></span>自動保存</div>
+    <button class="btn btn-cloud" onclick="showCaseList()" id="btn-cases">&#128196; 案件一覧</button>
+    <button class="btn btn-save" onclick="saveToSupabase()" id="btn-save-sb">&#9729; Supabaseへ保存</button>
     <button class="btn btn-word" onclick="downloadWord()">&#128196; Wordで保存</button>
     <button class="btn" onclick="window.print()">&#128424; 印刷・PDF</button>
     <button class="btn" onclick="resetAll()">リセット</button>
@@ -23285,6 +23318,8 @@ var __async = (__this, __arguments, generator) => {
 
     </div>
     <div class="action-bar">
+      <button class="btn btn-cloud" onclick="showCaseList()">&#128196; 案件一覧</button>
+      <button class="btn btn-save" onclick="saveToSupabase()">&#9729; Supabaseへ保存</button>
       <button class="btn btn-word" onclick="downloadWord()">&#128196; Wordで保存</button>
       <button class="btn" onclick="window.print()">&#128424; 印刷・PDF</button>
       <button class="btn" onclick="resetAll()">リセット</button>
@@ -23901,7 +23936,432 @@ function resetAll(){
   }
   renderHeirs(); renderBanks(); renderBH(); renderRE(); renderOT(); renderFU();
   go();
+  initSbUI();
 })();
+
+/* ============================================================
+   Supabase 保存・読み込み機能
+   ============================================================ */
+
+var SB_URL_KEY  = "sb_project_url";
+var SB_KEY_KEY  = "sb_anon_key";
+var SB_USER_KEY = "sb_user_name";
+var _sbCurrentCaseId = null; /* 現在編集中の案件ID */
+
+/* ---- 接続設定の取得 ---- */
+function getSbConfig(){
+  return {
+    url:  (localStorage.getItem(SB_URL_KEY)  || "").trim(),
+    key:  (localStorage.getItem(SB_KEY_KEY)  || "").trim(),
+    user: (localStorage.getItem(SB_USER_KEY) || "").trim()
+  };
+}
+
+/* ---- 設定モーダルを開く ---- */
+function openSbConfig(){
+  var cfg = getSbConfig();
+  document.getElementById("sb-url").value  = cfg.url;
+  document.getElementById("sb-key").value  = cfg.key;
+  document.getElementById("sb-user").value = cfg.user;
+  document.getElementById("sb-config-status").textContent = "";
+  document.getElementById("sb-config-modal").style.display = "flex";
+}
+function closeSbConfig(){
+  document.getElementById("sb-config-modal").style.display = "none";
+}
+
+/* ---- 設定を保存＆接続テスト ---- */
+function saveSbConfig(){
+  var url  = document.getElementById("sb-url").value.trim();
+  var key  = document.getElementById("sb-key").value.trim();
+  var user = document.getElementById("sb-user").value.trim();
+  var statusEl = document.getElementById("sb-config-status");
+
+  if(!url || !key){
+    statusEl.style.color = "#c0392b";
+    statusEl.textContent = "URLとAnon Keyを入力してください。";
+    return;
+  }
+
+  statusEl.style.color = "var(--text2)";
+  statusEl.textContent = "接続テスト中...";
+
+  /* casesテーブルに接続確認（1件だけ取得） */
+  fetch(url + "/rest/v1/cases?select=id&limit=1", {
+    headers: {
+      "apikey":        key,
+      "Authorization": "Bearer " + key,
+      "Content-Type":  "application/json"
+    }
+  })
+  .then(function(r){
+    if(r.ok || r.status === 406){
+      localStorage.setItem(SB_URL_KEY,  url);
+      localStorage.setItem(SB_KEY_KEY,  key);
+      localStorage.setItem(SB_USER_KEY, user);
+      statusEl.style.color = "#2d6a4f";
+      statusEl.textContent = "✓ 接続成功！設定を保存しました。";
+    } else {
+      return r.text().then(function(t){
+        statusEl.style.color = "#c0392b";
+        statusEl.textContent = "接続失敗 (HTTP " + r.status + "): " + t.slice(0,120);
+      });
+    }
+  })
+  .catch(function(e){
+    statusEl.style.color = "#c0392b";
+    statusEl.textContent = "エラー: " + e.message;
+  });
+}
+
+/* ---- 現在の入力データをオブジェクトに変換 ---- */
+function buildCasePayload(status, assignedUser){
+  return {
+    deceased_name:    document.getElementById("d-name").value.trim(),
+    deceased_honseki: document.getElementById("d-honseki").value.trim(),
+    deceased_address: document.getElementById("d-address").value.trim(),
+    death_date:       document.getElementById("d-death").value    || null,
+    doc_date:         document.getElementById("d-docdate").value  || null,
+    status:           status      || "入力中",
+    assigned_to:      assignedUser || getSbConfig().user || null,
+    heirs_json:       JSON.stringify(heirs),
+    banks_json:       JSON.stringify(banks),
+    bank_heirs_json:  JSON.stringify(bh),
+    re_json:          JSON.stringify(re),
+    other_json:       JSON.stringify(ot),
+    future_json:      JSON.stringify(fu),
+    updated_at:       new Date().toISOString()
+  };
+}
+
+/* ---- Supabaseへ保存（新規 or 上書き） ---- */
+function saveToSupabase(){
+  var cfg = getSbConfig();
+  if(!cfg.url || !cfg.key){
+    openSbConfig();
+    return;
+  }
+
+  var nm = document.getElementById("d-name").value.trim();
+  if(!nm){
+    alert("被相続人の氏名を入力してください。");
+    return;
+  }
+
+  var statusSel = document.getElementById("sb-status");
+  var status    = statusSel ? statusSel.value : "入力中";
+  var payload   = buildCasePayload(status, null);
+
+  var btnSave = document.getElementById("btn-save-sb");
+  if(btnSave){ btnSave.disabled = true; btnSave.textContent = "保存中..."; }
+
+  var promise;
+  if(_sbCurrentCaseId){
+    /* 既存案件の更新 (PATCH) */
+    promise = fetch(cfg.url + "/rest/v1/cases?id=eq." + _sbCurrentCaseId, {
+      method: "PATCH",
+      headers: {
+        "apikey":        cfg.key,
+        "Authorization": "Bearer " + cfg.key,
+        "Content-Type":  "application/json",
+        "Prefer":        "return=representation"
+      },
+      body: JSON.stringify(payload)
+    });
+  } else {
+    /* 新規案件の登録 (POST) */
+    payload.created_at = new Date().toISOString();
+    promise = fetch(cfg.url + "/rest/v1/cases", {
+      method: "POST",
+      headers: {
+        "apikey":        cfg.key,
+        "Authorization": "Bearer " + cfg.key,
+        "Content-Type":  "application/json",
+        "Prefer":        "return=representation"
+      },
+      body: JSON.stringify(payload)
+    });
+  }
+
+  promise
+  .then(function(r){
+    if(!r.ok) return r.text().then(function(t){ throw new Error("HTTP " + r.status + ": " + t.slice(0,200)); });
+    return r.json();
+  })
+  .then(function(data){
+    var row = Array.isArray(data) ? data[0] : data;
+    if(row && row.id){ _sbCurrentCaseId = row.id; }
+    if(btnSave){ btnSave.disabled = false; btnSave.textContent = "☁ Supabaseへ保存"; }
+    showToast("✓ 案件を保存しました" + (_sbCurrentCaseId ? " (ID: " + _sbCurrentCaseId.slice(0,8) + "…)" : ""), "success");
+  })
+  .catch(function(e){
+    if(btnSave){ btnSave.disabled = false; btnSave.textContent = "☁ Supabaseへ保存"; }
+    alert("保存に失敗しました。\n\n" + e.message + "\n\nSupabase接続設定を確認してください。");
+  });
+}
+
+/* ---- 案件一覧モーダルを開く ---- */
+function showCaseList(){
+  var cfg = getSbConfig();
+  if(!cfg.url || !cfg.key){
+    openSbConfig();
+    return;
+  }
+  document.getElementById("case-list-modal").style.display = "flex";
+  loadCaseList();
+}
+function closeCaseList(){
+  document.getElementById("case-list-modal").style.display = "none";
+}
+
+/* ---- 案件一覧を読み込む ---- */
+function loadCaseList(){
+  var cfg    = getSbConfig();
+  var search = (document.getElementById("case-search").value || "").trim();
+  var stf    = (document.getElementById("case-status-filter").value || "").trim();
+  var body   = document.getElementById("case-list-body");
+
+  body.innerHTML = "<div style=\"text-align:center;color:var(--text3);padding:30px\">読み込み中...</div>";
+
+  var url = cfg.url + "/rest/v1/cases?select=id,deceased_name,doc_date,status,assigned_to,created_at,updated_at&order=updated_at.desc&limit=100";
+  if(stf)    url += "&status=eq." + encodeURIComponent(stf);
+  if(search) url += "&deceased_name=ilike.*" + encodeURIComponent(search) + "*";
+
+  fetch(url, {
+    headers: {
+      "apikey":        cfg.key,
+      "Authorization": "Bearer " + cfg.key,
+      "Content-Type":  "application/json"
+    }
+  })
+  .then(function(r){
+    if(!r.ok) return r.text().then(function(t){ throw new Error("HTTP " + r.status + ": " + t.slice(0,200)); });
+    return r.json();
+  })
+  .then(function(rows){
+    if(!rows.length){
+      body.innerHTML = "<div style=\"text-align:center;color:var(--text3);padding:30px\">案件がありません。</div>";
+      return;
+    }
+    var STATUS_COLOR = {
+      "入力中":   "#185fa5",
+      "確認中":   "#b07d00",
+      "修正依頼": "#c0392b",
+      "完成":     "#2d6a4f",
+      "納品済":   "#6c757d"
+    };
+    var html = "<table style=\"width:100%;border-collapse:collapse;font-size:12px\">";
+    html += "<thead><tr style=\"background:var(--bg2);border-bottom:.5px solid var(--border2)\">";
+    html += "<th style=\"padding:8px 10px;text-align:left;font-weight:500\">被相続人</th>";
+    html += "<th style=\"padding:8px 10px;text-align:left;font-weight:500\">ステータス</th>";
+    html += "<th style=\"padding:8px 10px;text-align:left;font-weight:500\">担当者</th>";
+    html += "<th style=\"padding:8px 10px;text-align:left;font-weight:500\">更新日</th>";
+    html += "<th style=\"padding:8px 10px\"></th></tr></thead><tbody>";
+    rows.forEach(function(row){
+      var color = STATUS_COLOR[row.status] || "var(--text2)";
+      var upd   = row.updated_at ? row.updated_at.slice(0,10) : "-";
+      html += "<tr style=\"border-bottom:.5px solid var(--border);cursor:pointer\" onclick=\"loadCase('" + row.id + "')\"";
+      html += " onmouseover=\"this.style.background='var(--bg2)'\" onmouseout=\"this.style.background=''\">";
+      html += "<td style=\"padding:8px 10px\">" + esc(row.deceased_name || "-") + "</td>";
+      html += "<td style=\"padding:8px 10px\"><span style=\"color:" + color + ";font-weight:500\">" + esc(row.status||"-") + "</span></td>";
+      html += "<td style=\"padding:8px 10px\">" + esc(row.assigned_to || "-") + "</td>";
+      html += "<td style=\"padding:8px 10px\">" + esc(upd) + "</td>";
+      html += "<td style=\"padding:8px 10px;text-align:right\">";
+      html += "<button class=\"btn\" style=\"font-size:11px;padding:4px 10px\" onclick=\"event.stopPropagation();deleteCase('" + row.id + "',this)\">削除</button></td>";
+      html += "</tr>";
+    });
+    html += "</tbody></table>";
+    body.innerHTML = html;
+  })
+  .catch(function(e){
+    body.innerHTML = "<div style=\"color:#c0392b;padding:16px\">読み込みエラー: " + esc(e.message) + "</div>";
+  });
+}
+
+/* ---- 案件を読み込んでフォームに反映 ---- */
+function loadCase(id){
+  var cfg = getSbConfig();
+  fetch(cfg.url + "/rest/v1/cases?id=eq." + id + "&select=*", {
+    headers: {
+      "apikey":        cfg.key,
+      "Authorization": "Bearer " + cfg.key,
+      "Content-Type":  "application/json"
+    }
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(rows){
+    var row = rows[0];
+    if(!row){ alert("案件が見つかりませんでした。"); return; }
+
+    document.getElementById("d-name").value    = row.deceased_name    || "";
+    document.getElementById("d-honseki").value = row.deceased_honseki || "";
+    document.getElementById("d-address").value = row.deceased_address || "";
+    document.getElementById("d-death").value   = row.death_date       || "";
+    document.getElementById("d-docdate").value = row.doc_date         || "";
+
+    try{ heirs  = JSON.parse(row.heirs_json      || "[]"); }catch(e){ heirs=[]; }
+    try{ banks  = JSON.parse(row.banks_json      || "[]"); }catch(e){ banks=[]; }
+    try{ bh     = JSON.parse(row.bank_heirs_json || "[]"); }catch(e){ bh=[]; }
+    try{ re     = JSON.parse(row.re_json         || "[]"); }catch(e){ re=[]; }
+    try{ ot     = JSON.parse(row.other_json      || "[]"); }catch(e){ ot=[]; }
+    try{ fu     = JSON.parse(row.future_json     || "[]"); }catch(e){ fu=[]; }
+
+    _sbCurrentCaseId = row.id;
+
+    renderHeirs(); renderBanks(); renderBH(); renderRE(); renderOT(); renderFU();
+    go();
+    closeCaseList();
+    showToast("✓ 案件を読み込みました: " + (row.deceased_name||""), "success");
+  })
+  .catch(function(e){
+    alert("読み込みエラー: " + e.message);
+  });
+}
+
+/* ---- 案件を削除 ---- */
+function deleteCase(id, btn){
+  if(!confirm("この案件を削除しますか？\n（元に戻せません）")) return;
+  var cfg = getSbConfig();
+  btn.disabled = true; btn.textContent = "削除中…";
+  fetch(cfg.url + "/rest/v1/cases?id=eq." + id, {
+    method: "DELETE",
+    headers: {
+      "apikey":        cfg.key,
+      "Authorization": "Bearer " + cfg.key,
+      "Content-Type":  "application/json"
+    }
+  })
+  .then(function(r){
+    if(r.ok || r.status === 204){
+      if(_sbCurrentCaseId === id){ _sbCurrentCaseId = null; }
+      loadCaseList();
+      showToast("案件を削除しました", "info");
+    } else {
+      btn.disabled = false; btn.textContent = "削除";
+      r.text().then(function(t){ alert("削除失敗: " + t.slice(0,120)); });
+    }
+  })
+  .catch(function(e){
+    btn.disabled = false; btn.textContent = "削除";
+    alert("削除エラー: " + e.message);
+  });
+}
+
+/* ---- トースト通知 ---- */
+function showToast(msg, type){
+  var t = document.getElementById("toast-msg");
+  if(!t){
+    t = document.createElement("div");
+    t.id = "toast-msg";
+    t.style.cssText = "position:fixed;bottom:24px;left:50%;transform:translateX(-50%);padding:10px 20px;border-radius:8px;font-size:13px;font-family:inherit;z-index:9999;transition:opacity .3s;pointer-events:none";
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.style.background = type === "success" ? "#2d6a4f" : type === "info" ? "#185fa5" : "#c0392b";
+  t.style.color = "#fff";
+  t.style.opacity = "1";
+  clearTimeout(t._timer);
+  t._timer = setTimeout(function(){ t.style.opacity = "0"; }, 3000);
+}
+
+/* ---- 設定ボタンをヘッダーに追加（初期化時） ---- */
+function initSbUI(){
+  /* ヘッダーの設定ボタン */
+  var btnCases = document.getElementById("btn-cases");
+  if(btnCases){
+    btnCases.onclick = showCaseList;
+  }
+  var btnSaveSb = document.getElementById("btn-save-sb");
+  if(btnSaveSb){
+    btnSaveSb.onclick = saveToSupabase;
+  }
+  /* 設定アイコンをheader-actionsに追加 */
+  var ha = document.querySelector(".header-actions");
+  if(ha && !document.getElementById("btn-sb-config")){
+    var btn = document.createElement("button");
+    btn.id        = "btn-sb-config";
+    btn.className = "btn";
+    btn.title     = "Supabase接続設定";
+    btn.innerHTML = "&#9881; 設定";
+    btn.onclick   = openSbConfig;
+    ha.insertBefore(btn, ha.firstChild);
+  }
+}
+
+/* Enterキーで案件検索 */
+document.addEventListener("DOMContentLoaded", function(){
+  var searchEl = document.getElementById("case-search");
+  if(searchEl) searchEl.addEventListener("keydown", function(e){ if(e.key==="Enter") loadCaseList(); });
+  var filterEl = document.getElementById("case-status-filter");
+  if(filterEl) filterEl.addEventListener("change", loadCaseList);
+});
+
 </script>
+
+<!-- ========== Supabase設定モーダル ========== -->
+<div class="modal-overlay" id="sb-config-modal" style="display:none" onclick="if(event.target===this)closeSbConfig()">
+  <div class="modal">
+    <button class="close-btn" onclick="closeSbConfig()">&#215;</button>
+    <h2>&#9729; Supabase 接続設定</h2>
+    <p>Supabaseプロジェクトの情報を入力してください。設定はブラウザに保存されます。</p>
+    <div class="field"><label>Project URL</label>
+      <input type="text" id="sb-url" placeholder="https://xxxxxx.supabase.co">
+    </div>
+    <div class="field"><label>Anon Key（公開キー）</label>
+      <input type="text" id="sb-key" placeholder="eyJhbGciOiJIUzI1NiIs...">
+    </div>
+    <div class="field"><label>担当者名</label>
+      <input type="text" id="sb-user" placeholder="山田太郎">
+    </div>
+    <div class="field"><label>ステータス</label>
+      <select id="sb-status">
+        <option value="入力中">入力中</option>
+        <option value="確認中">確認中</option>
+        <option value="修正依頼">修正依頼</option>
+        <option value="完成">完成</option>
+        <option value="納品済">納品済</option>
+      </select>
+    </div>
+    <p class="note">
+      &#9432; URLとAnon Keyは Supabase ダッシュボード → Project Settings → API で確認できます。<br>
+      入力した情報はこのブラウザのlocalStorageにのみ保存されます。
+    </p>
+    <div class="btn-row">
+      <button class="btn" onclick="closeSbConfig()">キャンセル</button>
+      <button class="btn btn-save" onclick="saveSbConfig()">設定を保存して接続テスト</button>
+    </div>
+    <div id="sb-config-status" style="margin-top:12px;font-size:12px"></div>
+  </div>
+</div>
+
+<!-- ========== 案件一覧モーダル ========== -->
+<div class="modal-overlay" id="case-list-modal" style="display:none" onclick="if(event.target===this)closeCaseList()">
+  <div class="modal case-list-modal">
+    <button class="close-btn" onclick="closeCaseList()">&#215;</button>
+    <h2>&#128196; 案件一覧</h2>
+    <p style="margin-bottom:10px">保存済みの案件を選択すると読み込めます。</p>
+    <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
+      <input type="text" id="case-search" placeholder="被相続人名・担当者で検索..." style="flex:1;padding:7px 9px;border:.5px solid var(--border2);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:13px;font-family:inherit" oninput="filterCases()">
+      <select id="case-status-filter" style="padding:7px 9px;border:.5px solid var(--border2);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:13px;font-family:inherit" onchange="filterCases()">
+        <option value="">すべてのステータス</option>
+        <option value="入力中">入力中</option>
+        <option value="確認中">確認中</option>
+        <option value="修正依頼">修正依頼</option>
+        <option value="完成">完成</option>
+        <option value="納品済">納品済</option>
+      </select>
+      <button class="btn btn-cloud" onclick="loadCaseList()" style="flex-shrink:0">&#8635; 更新</button>
+    </div>
+    <div class="modal-body">
+      <div id="case-list-body">
+        <div style="text-align:center;color:var(--text3);padding:30px">読み込み中...</div>
+      </div>
+    </div>
+    <div class="btn-row" style="margin-top:12px">
+      <button class="btn" onclick="closeCaseList()">閉じる</button>
+      <button class="btn btn-save" onclick="saveToSupabase()">&#9729; 現在の内容を保存</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>
