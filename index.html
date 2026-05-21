@@ -23885,6 +23885,7 @@ function downloadWord(){
   });
 
   D.Packer.toBlob(doc).then(function(blob){
+    /* ---- ローカルダウンロード ---- */
     var url = URL.createObjectURL(blob);
     var a   = document.createElement("a");
     a.href  = url;
@@ -23893,11 +23894,81 @@ function downloadWord(){
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+
+    /* ---- Supabase Storageへ自動アップロード ---- */
+    uploadDocxToStorage(blob, nm);
+
   }).catch(function(e){
     console.error("docx生成エラー:", e);
     alert("Wordファイルの生成中にエラーが発生しました。\n詳細はコンソールをご確認ください。");
   });
 }
+
+/* ============================================================
+   Supabase Storage への docx アップロード
+   ============================================================ */
+function uploadDocxToStorage(blob, nm){
+  var cfg = getSbConfig();
+  if(!cfg.url || !cfg.key){
+    /* 接続設定なし → スキップ（エラーにしない） */
+    return;
+  }
+  if(!_sbCurrentCaseId){
+    /* 案件が未保存 → スキップ */
+    return;
+  }
+
+  /* ファイルパス: cases/{case_id}/{timestamp}_被相続人名.docx */
+  var ts       = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  var safeName = nm.replace(/[\s\u3000]+/g, "_");
+  var filePath = "cases/" + _sbCurrentCaseId + "/" + ts + "_" + safeName + ".docx";
+  var storageUrl = cfg.url + "/storage/v1/object/docx-files/" + filePath;
+
+  /* ArrayBufferに変換してPUT */
+  blob.arrayBuffer().then(function(buf){
+    return fetch(storageUrl, {
+      method:  "POST",
+      headers: {
+        "apikey":        cfg.key,
+        "Authorization": "Bearer " + cfg.key,
+        "Content-Type":  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "x-upsert":      "true"
+      },
+      body: buf
+    });
+  })
+  .then(function(r){
+    if(!r.ok) return r.text().then(function(t){ throw new Error("HTTP " + r.status + ": " + t.slice(0,120)); });
+    return r.json();
+  })
+  .then(function(data){
+    /* case_filesテーブルに記録 */
+    var fileKey = data.Key || filePath;
+    return fetch(cfg.url + "/rest/v1/case_files", {
+      method:  "POST",
+      headers: {
+        "apikey":        cfg.key,
+        "Authorization": "Bearer " + cfg.key,
+        "Content-Type":  "application/json",
+        "Prefer":        "return=minimal"
+      },
+      body: JSON.stringify({
+        case_id:    _sbCurrentCaseId,
+        file_type:  "docx",
+        file_path:  fileKey,
+        created_at: new Date().toISOString()
+      })
+    });
+  })
+  .then(function(){
+    showToast("☁ Storageへの保存も完了しました", "success");
+  })
+  .catch(function(e){
+    /* アップロード失敗はサイレントに（ローカルDLは成功しているため） */
+    console.warn("Storage upload failed:", e.message);
+  });
+}
+
 
 /* ============================================================
    リセット
